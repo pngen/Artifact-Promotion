@@ -1,0 +1,9 @@
+@PACKAGE_INIT@
+
+include(CMakeFindDependencyMacro)
+
+set(ArtifactPromotion_VERSION "@PROJECT_VERSION@")
+
+include("${CMAKE_CURRENT_LIST_DIR}/ArtifactPromotionTargets.cmake")
+
+check_required_components(ArtifactPromotion)

@@ -1,0 +1,43 @@
+# Build directories
+build/
+build-*/
+out/
+cmake-build-*/
+CMakeFiles/
+CMakeCache.txt
+cmake_install.cmake
+CTestTestfile.cmake
+Testing/
+_deps/
+install/
+stage/
+
+# Compiler and tooling output
+*.o
+*.obj
+*.pdb
+*.ilk
+*.exp
+*.lib
+*.dll
+*.exe
+*.so
+*.dylib
+*.a
+*.idb
+*.log
+*.tmp
+*.user
+
+# Editor and OS noise
+.vs/
+.vscode/
+.idea/
+*.swp
+Thumbs.db
+desktop.ini
+
+# Local runtime state produced by tools and tests
+*.apsnap
+*.apstate
+ap-state/
