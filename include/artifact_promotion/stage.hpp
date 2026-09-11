@@ -50,8 +50,10 @@ inline constexpr std::uint8_t kStageMax = static_cast<std::uint8_t>(Stage::Retir
 // LifecycleGraph
 //
 // The authoritative, policy-selected topology of legal transitions. A graph is
-// always validated: it must be acyclic, every node must be reachable from the
-// candidate entry stage, and every edge must reference known stages.
+// always validated: the promotion spine must be acyclic, every node must be
+// reachable from the candidate entry stage, and every edge must reference known
+// stages. The only cycle a valid graph may contain is the governed return from a
+// holding stage back to CANDIDATE, which is how a quarantine is released.
 //
 // A jump from CANDIDATE straight to PROMOTED is illegal unless the active graph
 // contains that exact edge.

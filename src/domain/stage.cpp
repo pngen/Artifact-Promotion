@@ -59,6 +59,16 @@ bool is_terminal_failure_stage(Stage stage) noexcept {
     return stage == Stage::Revoked || stage == Stage::Retired || stage == Stage::Superseded;
 }
 
+namespace {
+
+// A holding stage withholds an artifact from promotion and hands it back to
+// CANDIDATE only through an authorized release decision. QUARANTINED is the
+// only such stage, so its release edge is a governed return rather than a
+// promotion step.
+[[nodiscard]] bool is_holding_stage(Stage stage) noexcept { return stage == Stage::Quarantined; }
+
+}  // namespace
+
 LifecycleGraph LifecycleGraph::reference() {
     LifecycleGraph graph;
     (void)graph.add_edge(Stage::Candidate, Stage::Verified);
@@ -271,12 +281,18 @@ Status LifecycleGraph::validate(Stage entry) const {
         }
     }
 
-    // Cycle detection over the subgraph induced by the reachable stages. The
-    // in-degree of the entry stage is forced to zero because an edge from an
-    // unreachable producer is not part of the subgraph being ordered; leaving it
-    // counted would hold the entry stage out of the queue and make an acyclic
-    // graph look cyclic. The graph is small and strictly bounded, so a
-    // Kahn-style topological count is exact and needs no recursion.
+    // Cycle detection over the subgraph induced by the reachable stages.
+    //
+    // A well formed lifecycle really does carry an edge back into the entry
+    // stage: a quarantine is released by an authorized decision that returns the
+    // artifact to CANDIDATE for full re-evaluation. Excluding exactly the edges
+    // that leave a holding stage is what separates that governed return from a
+    // promotion cycle. Forcing the entry in-degree to zero instead would discard
+    // every edge back into CANDIDATE, so an ungoverned VERIFIED -> CANDIDATE
+    // edge -- which lets an artifact re-enter promotion with no release decision
+    // and no new evidence -- would validate as acyclic. The graph is small and
+    // strictly bounded, so a Kahn-style topological count is exact and needs no
+    // recursion.
     std::array<std::size_t, kStageCount> in_degree{};
     std::size_t reachable_nodes = 0;
     std::size_t reachable_edges = 0;
@@ -285,12 +301,14 @@ Status LifecycleGraph::validate(Stage entry) const {
             continue;
         }
         ++reachable_nodes;
+        if (is_holding_stage(static_cast<Stage>(index))) {
+            continue;
+        }
         for (const Stage next : adjacency[index]) {
             ++in_degree[static_cast<std::size_t>(next)];
             ++reachable_edges;
         }
     }
-    in_degree[static_cast<std::size_t>(entry)] = 0;
     // The topological sort uses its own buffer. Reusing the reachability
     // frontier would leave stale entries in front of the freshly seeded roots,
     // and the sort would then count nodes that were never ordered.
