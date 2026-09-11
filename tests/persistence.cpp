@@ -73,16 +73,32 @@ AP_TEST(every_single_byte_corruption_inside_the_payload_is_detected) {
     // The footer digest covers every preceding byte, so flipping any byte of
     // the snapshot must be detected. The sample stride keeps the test bounded
     // while still covering the whole file including the header and the footer.
+    //
+    // Detection is region-specific, and is asserted as such. decode() confirms
+    // the magic before it can locate the footer, so a byte inside the magic
+    // means the file is not a snapshot at all and is reported as a format
+    // error. Every other byte -- the version, the reserved field, the payload
+    // length, the sections, and the footer digest itself -- is caught by the
+    // digest and is reported as corruption.
+    constexpr std::size_t kMagicBytes = 8;
     const std::size_t stride = bytes.size() > 4096 ? bytes.size() / 2048 : 1;
     std::size_t checked = 0;
+    std::size_t digest_rejections = 0;
     for (std::size_t offset = 0; offset < bytes.size(); offset += stride) {
         auto damaged = StatePersistence::decode(corrupt_at(bytes, offset));
         AP_CHECK(!damaged.has_value());
-        AP_CHECK_EQ(damaged.status().code(), ErrorCode::PersistenceCorrupt);
+        if (offset < kMagicBytes) {
+            AP_CHECK_EQ(damaged.status().code(), ErrorCode::PersistenceFormatError);
+        } else {
+            AP_CHECK_EQ(damaged.status().code(), ErrorCode::PersistenceCorrupt);
+            ++digest_rejections;
+        }
         ++checked;
     }
     context.record("corruption_offsets_checked", std::to_string(checked));
+    context.record("corruption_digest_rejections", std::to_string(digest_rejections));
     AP_CHECK(checked > 100);
+    AP_CHECK(digest_rejections > 100);
 }
 
 AP_TEST(truncation_at_every_boundary_is_rejected) {
@@ -354,4 +370,4 @@ AP_TEST(a_snapshot_carrying_evidence_for_an_absent_revision_is_refused) {
     AP_CHECK_EQ(installed.code(), ErrorCode::PersistenceCorrupt);
 }
 
-int main() { return TestContext::instance().run_all("persistence"); }
+int main(int argc, char** argv) { return run_suite_from_command_line("persistence", argc, argv); }

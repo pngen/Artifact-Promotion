@@ -48,12 +48,43 @@ AP_TEST(a_plan_issued_under_one_policy_generation_does_not_commit_after_a_new_on
 
 AP_TEST(a_stricter_policy_blocks_a_transition_that_previously_passed) {
     Scenario scenario;
+
+    // The reference executable pipeline demands build, unit (in the declared
+    // environment), and integration evidence for VERIFIED -> QUALIFIED. Both
+    // subjects are given all of it, so the only thing that can refuse the
+    // transition under the stricter policy is the evidence that policy adds.
+    const auto prepare_verified_executable = [&scenario](ArtifactId subject, std::string_view tag) {
+        const std::string name = std::string("exe-strict-") + std::string(tag);
+        const std::string digest = std::string("digest-strict-") + std::string(tag);
+        (void)scenario.register_artifact(subject, ArtifactKind::Executable, name, digest);
+        Scenario::EvidenceSpec provenance;
+        provenance.type = EvidenceType::ProvenanceComplete;
+        (void)scenario.submit_spec(subject, provenance);
+        Scenario::EvidenceSpec build;
+        build.type = EvidenceType::BuildPass;
+        (void)scenario.submit_spec(subject, build);
+        Scenario::EvidenceSpec unit;
+        unit.type = EvidenceType::UnitTestPass;
+        unit.environment = "windows-x64-msvc";
+        (void)scenario.submit_spec(subject, unit);
+        Scenario::EvidenceSpec integration;
+        integration.type = EvidenceType::IntegrationTestPass;
+        (void)scenario.submit_spec(subject, integration);
+        return scenario.step(subject, Stage::Verified);
+    };
+
+    // The first subject is what makes the test name true: the transition
+    // commits under the policy in force. It is committed outright rather than
+    // merely evaluated, because an outstanding plan would make the later
+    // attempt on the second subject a conflict instead of an evidence refusal.
+    const ArtifactId before = scenario.make_artifact_id();
+    AP_CHECK_EQ(prepare_verified_executable(before, "before"), PromotionOutcome::PromotionCommitted);
+    AP_CHECK_EQ(scenario.step(before, Stage::Qualified), PromotionOutcome::PromotionCommitted);
+
+    // The second subject carries exactly the same evidence and is the one
+    // measured against the stricter policy.
     const ArtifactId id = scenario.make_artifact_id();
-    (void)scenario.register_artifact(id, ArtifactKind::Executable, "exe-strict", "digest-strict-1");
-    Scenario::EvidenceSpec provenance;
-    provenance.type = EvidenceType::ProvenanceComplete;
-    (void)scenario.submit_spec(id, provenance);
-    AP_CHECK_EQ(scenario.step(id, Stage::Verified), PromotionOutcome::PromotionCommitted);
+    AP_CHECK_EQ(prepare_verified_executable(id, "subject"), PromotionOutcome::PromotionCommitted);
 
     // The rule that governs this artifact class is replaced by one that
     // additionally demands sanitizer evidence. The subject is an Executable, so
@@ -442,4 +473,4 @@ AP_TEST(a_coordinator_authority_identifies_one_incarnation) {
     AP_CHECK_EQ(refused.status().code(), ErrorCode::PlanNotFound);
 }
 
-int main() { return TestContext::instance().run_all("authority"); }
+int main(int argc, char** argv) { return run_suite_from_command_line("authority", argc, argv); }
