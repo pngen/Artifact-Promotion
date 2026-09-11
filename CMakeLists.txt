@@ -1,7 +1,7 @@
 cmake_minimum_required(VERSION 3.20)
 
 project(ArtifactPromotion
-    VERSION 1.0.0
+    VERSION 1.0.2
     DESCRIPTION "Vendor-neutral C++20 runtime that governs whether an autonomously produced artifact may advance lifecycle stages"
     HOMEPAGE_URL "https://github.com/pngen/Artifact-Promotion"
     LANGUAGES CXX)
