@@ -165,6 +165,11 @@ Result<PromotionEngine::TrustMutation> PromotionEngine::release_quarantine(Artif
             result.artifact = *artifact;
             result.reasons = decision.reasons;
             ++persist_epoch_;
+            // notify_change() acquires a shared lock on state_mutex_, and this
+            // thread still holds that mutex exclusively. Re-entering it here
+            // deadlocks, because a shared_mutex is not recursive: the exclusive
+            // lock is released first and the listener runs exactly once.
+            lock.unlock();
             notify_change();
             return result;
         }
