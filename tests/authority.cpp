@@ -61,16 +61,29 @@ AP_TEST(a_stricter_policy_blocks_a_transition_that_previously_passed) {
     // unscoped fallback would leave the governed path unchanged.
     PromotionPolicy stricter =
         make_reference_policy(PromotionPolicyId::from_parts(0x1234, 0x9ABC), PolicyGeneration(2));
+    // Every rule governing Verified -> Qualified is replaced, whichever scope it
+    // carried, so the strengthened requirement cannot be shadowed by a fallback.
+    std::vector<PolicyRule> rebuilt;
+    bool replaced = false;
     for (PolicyRule& rule : stricter.rules) {
-        if (rule.from == Stage::Verified && rule.to == Stage::Qualified && rule.has_kind_scope &&
-            rule.kind_scope == ArtifactKind::Executable) {
-            Gate gate;
-            gate.kind = GateKind::EvidenceRequired;
-            gate.evidence_type = EvidenceType::SanitizerPass;
-            gate.label = "sanitizer evidence is mandatory under the stricter policy";
-            rule.requirements.push_back(gate);
+        if (rule.from == Stage::Verified && rule.to == Stage::Qualified) {
+            if (!replaced) {
+                Gate gate;
+                gate.kind = GateKind::EvidenceRequired;
+                gate.evidence_type = EvidenceType::SanitizerPass;
+                gate.label = "sanitizer evidence is mandatory under the stricter policy";
+                rule.requirements.push_back(gate);
+                rule.has_kind_scope = false;
+                (void)rule.kind_scope;
+                rebuilt.push_back(rule);
+                replaced = true;
+            }
+            continue;
         }
+        rebuilt.push_back(rule);
     }
+    AP_REQUIRE(replaced);
+    stricter.rules = rebuilt;
     AP_REQUIRE(scenario.engine().publish_policy(stricter).has_value());
 
     AP_CHECK_EQ(scenario.step(id, Stage::Qualified), PromotionOutcome::EvidenceMissing);
@@ -115,21 +128,15 @@ AP_TEST(a_changed_lifecycle_graph_makes_the_transition_illegal) {
     // A graph that deliberately drops the verified -> qualified edge. The
     // reference lifecycle contains it, so the rewritten graph is genuinely a
     // different structure rather than a re-registration of the same edges.
-    LifecycleGraph graph;
-    (void)graph.add_edge(Stage::Candidate, Stage::Verified);
-    (void)graph.add_edge(Stage::Qualified, Stage::Staged);
-    (void)graph.add_edge(Stage::Staged, Stage::Approved);
-    (void)graph.add_edge(Stage::Approved, Stage::Promoted);
-    (void)graph.add_edge(Stage::Promoted, Stage::Revoked);
-    (void)graph.add_edge(Stage::Promoted, Stage::Superseded);
-    (void)graph.add_edge(Stage::Revoked, Stage::Retired);
-    (void)graph.add_edge(Stage::Superseded, Stage::Retired);
-    (void)graph.add_edge(Stage::Candidate, Stage::Quarantined);
-    (void)graph.add_edge(Stage::Verified, Stage::Quarantined);
-    (void)graph.add_edge(Stage::Qualified, Stage::Quarantined);
-    (void)graph.add_edge(Stage::Staged, Stage::Quarantined);
-    (void)graph.add_edge(Stage::Approved, Stage::Quarantined);
-    (void)graph.add_edge(Stage::Promoted, Stage::Quarantined);
+    LifecycleGraph graph = LifecycleGraph::reference();
+    const std::vector<LifecycleGraph::Edge> baseline = graph.edges();
+    graph = LifecycleGraph();
+    for (const LifecycleGraph::Edge& edge : baseline) {
+        if (edge.from == Stage::Promoted && edge.to == Stage::Revoked) {
+            continue;
+        }
+        (void)graph.add_edge(edge.from, edge.to);
+    }
     graph.canonicalize();
     AP_CHECK_EQ(graph.validate(Stage::Candidate).code(), ErrorCode::Ok);
 

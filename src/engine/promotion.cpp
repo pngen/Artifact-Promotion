@@ -286,6 +286,37 @@ Result<PromotionEngine::CommitResult> PromotionEngine::commit(const PromotionPla
                           plan.id.to_string());
         }
 
+        // A plan is authority to commit the transition it was derived for, under
+        // the policy that governed that derivation. Comparing the plan only
+        // against itself would let a plan outlive the policy that justified it:
+        // a stricter policy published after the plan was issued, or a lifecycle
+        // graph that no longer permits the transition, would be ignored and the
+        // stale plan would still commit. The governing policy body, generation,
+        // and lifecycle digest are therefore checked against the coordinator's
+        // current authority before anything is committed.
+        {
+            const PromotionPolicy& active = state_.policy();
+            const Digest active_lifecycle_digest = active.graph.graph_digest();
+            const bool policy_body_changed = !(active.policy_digest == plan.policy_digest);
+            const bool generation_changed = !(state_.active_policy_generation == plan.policy_generation);
+            const bool lifecycle_changed = !(active_lifecycle_digest == plan.lifecycle_digest);
+            if (policy_body_changed || generation_changed || lifecycle_changed) {
+                PromotionDecision& stale = state_.decisions[stored_plan->second.decision];
+                result.outcome = PromotionOutcome::Conflict;
+                stale.outcome = PromotionOutcome::Conflict;
+                stale.reasons.push_back(Reason(
+                    ErrorCode::PolicyGenerationStale,
+                    policy_body_changed || generation_changed
+                        ? "the governing policy changed after this plan was derived; the plan must be re-derived "
+                          "under the current policy before it can commit"
+                        : "the lifecycle graph changed after this plan was derived; the plan must be re-derived "
+                          "under the current policy before it can commit",
+                    plan.id.to_string()));
+                state_.pending.erase(plan.artifact);
+                return result;
+            }
+        }
+
         PromotionDecision& decision = state_.decisions[stored_plan->second.decision];
         result.decision = decision;
 
