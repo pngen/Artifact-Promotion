@@ -341,4 +341,4 @@ AP_TEST(no_orphan_processes_remain_after_the_suite) {
     AP_CHECK_EQ(remove_file(state_path).code(), ErrorCode::Ok);
 }
 
-int main() { return TestContext::instance().run_all("distributed"); }
+int main(int argc, char** argv) { return run_suite_from_command_line("distributed", argc, argv); }

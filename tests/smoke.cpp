@@ -111,6 +111,6 @@ AP_TEST(evidence_bound_to_an_older_revision_does_not_promote_the_newer_one) {
     AP_CHECK(superseded.value().supersession.active);
 }
 
-int main() {
-    return TestContext::instance().run_all("smoke");
+int main(int argc, char** argv) {
+    return run_suite_from_command_line("smoke", argc, argv);
 }

@@ -109,6 +109,7 @@ constexpr std::size_t kEvidenceClasses = 6;
 }  // namespace
 
 AP_TEST(randomized_operation_sequences_preserve_every_invariant) {
+    context.phase("SETUP");
     const std::uint64_t base_seed = 0x5EED0000ULL;
     const std::size_t seeds = 24;
     const std::size_t operations_per_seed = 260;
@@ -118,6 +119,9 @@ AP_TEST(randomized_operation_sequences_preserve_every_invariant) {
     for (std::size_t seed_index = 0; seed_index < seeds; ++seed_index) {
         const std::uint64_t seed = base_seed + seed_index;
         SplitMix64 random(seed);
+        // One seed is one independently reproducible state-machine run: the
+        // marker names exactly which seed was executing when it stopped.
+        context.phase("SEED " + std::to_string(seed));
         Scenario scenario;
         std::vector<ArtifactId> pool;
         std::vector<PromotionPlan> plans;
@@ -383,6 +387,7 @@ AP_TEST(randomized_operation_sequences_preserve_every_invariant) {
         }
     }
 
+    context.phase("VERIFY");
     context.record("property_seeds", std::to_string(seeds));
     context.record("property_operations", std::to_string(seeds * operations_per_seed));
     context.record("property_committed_transitions", std::to_string(committed_transitions));
@@ -390,6 +395,7 @@ AP_TEST(randomized_operation_sequences_preserve_every_invariant) {
 }
 
 AP_TEST(no_artifact_ever_holds_two_current_stages) {
+    context.phase("SETUP");
     SplitMix64 random(0xC0FFEEULL);
     Scenario scenario;
     std::vector<ArtifactId> pool;
@@ -437,6 +443,7 @@ AP_TEST(no_artifact_ever_holds_two_current_stages) {
 
     AP_CHECK_EQ(scenario.engine().check_invariants().code(), ErrorCode::Ok);
 
+    context.phase("VERIFY");
     std::size_t authoritative = 0;
     for (const ArtifactId id : pool) {
         const auto view = scenario.engine().inspect_artifact(id);
@@ -452,6 +459,7 @@ AP_TEST(no_artifact_ever_holds_two_current_stages) {
 }
 
 AP_TEST(pending_transition_accounting_closes_exactly) {
+    context.phase("SETUP");
     SplitMix64 random(0xABCDEFULL);
     Scenario scenario;
     std::vector<ArtifactId> pool;
@@ -500,12 +508,14 @@ AP_TEST(pending_transition_accounting_closes_exactly) {
         AP_CHECK_EQ(scenario.engine().check_invariants().code(), ErrorCode::Ok);
     }
 
+    context.phase("VERIFY");
     (void)scenario.engine().recover_in_flight();
     AP_CHECK_EQ(scenario.engine().count_pending_transitions(), static_cast<std::size_t>(0));
     AP_CHECK_EQ(scenario.engine().check_invariants().code(), ErrorCode::Ok);
 }
 
 AP_TEST(a_replayed_request_can_never_resurrect_revoked_authority) {
+    context.phase("SETUP");
     Scenario scenario;
     const ArtifactId id = scenario.make_artifact_id();
     (void)scenario.register_artifact(id, ArtifactKind::Executable, "replay", "replay-digest-1");
@@ -521,11 +531,13 @@ AP_TEST(a_replayed_request_can_never_resurrect_revoked_authority) {
     original.attempt = scenario.make_attempt_id();
     original.authority = scenario.authority();
 
+    context.phase("REVOKE");
     (void)scenario.engine().revoke(id, promoted.promotion_decision, "security_finding", "withdrawn",
                                    scenario.authority());
 
     // Replaying the original request identity, and a fresh one, both fail to
     // restore authority.
+    context.phase("VERIFY");
     const auto replayed = scenario.engine().promote(original);
     AP_REQUIRE(replayed.has_value());
     AP_CHECK(replayed.value().outcome != PromotionOutcome::PromotionCommitted);
@@ -533,4 +545,4 @@ AP_TEST(a_replayed_request_can_never_resurrect_revoked_authority) {
     AP_CHECK(scenario.current(id).revocation.active);
 }
 
-int main() { return TestContext::instance().run_all("property"); }
+int main(int argc, char** argv) { return run_suite_from_command_line("property", argc, argv); }

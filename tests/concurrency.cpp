@@ -1178,6 +1178,6 @@ AP_TEST(shutdown_during_active_work) {
     context.record("shutdown_during_active_work.authoritative_artifacts", std::to_string(authoritative));
 }
 
-int main() {
-    return TestContext::instance().run_all("concurrency");
+int main(int argc, char** argv) {
+    return run_suite_from_command_line("concurrency", argc, argv);
 }

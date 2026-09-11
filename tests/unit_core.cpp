@@ -605,4 +605,4 @@ AP_TEST(custom_evidence_classes_are_supported_without_becoming_an_untyped_bucket
     AP_CHECK(mismatched.custom_evidence_type != custom.custom_evidence_type);
 }
 
-int main() { return TestContext::instance().run_all("unit_core"); }
+int main(int argc, char** argv) { return run_suite_from_command_line("unit_core", argc, argv); }

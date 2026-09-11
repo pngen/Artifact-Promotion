@@ -21,12 +21,35 @@
 namespace artifact_promotion::test {
 
 // ---------------------------------------------------------------------------
+// Run selection
+//
+// Every suite is a set of independently addressable cases with stable names.
+// The runner can enumerate the cases, run all of them, or run exactly one, so a
+// case that blocks is identified by the progress markers it produced instead of
+// degrading an entire suite into an undetermined verdict.
+// ---------------------------------------------------------------------------
+struct RunOptions {
+    bool list_only = false;
+    std::string select;  // empty selects every case; otherwise a case name or 1-based index
+};
+
+// ---------------------------------------------------------------------------
 // TestContext
 //
 // A minimal deterministic test runner. There are no time limits anywhere: a
 // test either reaches its assertions or it does not. A failure prints the test
 // name, the file, the line, and the rendered values, and the process exits
 // non-zero so the harness observes the failure.
+//
+// Progress is written and flushed one line at a time, and stdout is unbuffered
+// for the whole run, so the last marker a process produced is on disk even when
+// the case that produced it never returns:
+//
+//   BEGIN <suite>::<case>             emitted before the case body runs
+//   PHASE <suite>::<case> <PHASE>     emitted on every explicit phase change
+//   DETAIL <suite>::<case>: <reason>  emitted for each failing check
+//   PASS <suite>::<case>              emitted when the case body returns clean
+//   FAIL <suite>::<case>: <reason>    emitted with the first failure reason
 // ---------------------------------------------------------------------------
 class TestContext {
 public:
@@ -40,7 +63,18 @@ public:
     static TestContext& instance();
 
     void add(std::string name, Body body);
+
+    // Runs every case of the suite.
     int run_all(std::string_view suite_name);
+
+    // Runs the cases the options select: all of them, or exactly one by stable
+    // name or 1-based index.
+    int run_all(std::string_view suite_name, const RunOptions& options);
+
+    // Emits a phase transition for the case currently executing. A case with
+    // blocking or concurrent phases calls this so the last marker a process
+    // produced names the phase it stopped in, not merely the case.
+    void phase(std::string_view phase_name);
 
     void check(bool condition, std::string_view expression, std::string_view file, int line);
     void check_equal(std::string_view lhs_text, std::string_view rhs_text, const std::string& lhs,
@@ -53,16 +87,25 @@ public:
     [[nodiscard]] std::size_t checks() const noexcept { return checks_; }
     [[nodiscard]] std::size_t failures() const noexcept { return failures_; }
     [[nodiscard]] const std::string& current_test() const noexcept { return current_test_; }
+    [[nodiscard]] const std::string& suite_name() const noexcept { return suite_; }
 
 private:
     friend void set_scratch_directory(std::string path);
     friend const std::string& scratch_directory();
+    void record_failure(const std::string& reason);
+
     std::vector<Case> cases_;
+    std::string suite_;
     std::string current_test_;
+    std::string first_failure_;
     std::size_t checks_ = 0;
     std::size_t failures_ = 0;
     std::vector<std::pair<std::string, std::string>> records_;
 };
+
+// Runs one suite from a command line: no arguments runs every case, --list
+// enumerates the cases, and --case <name|index> runs exactly one of them.
+int run_suite_from_command_line(std::string_view suite_name, int argc, char** argv);
 
 // Installs and returns the per-process scratch directory. It lives under the
 // system temporary directory and is removed when the suite finishes.

@@ -7,6 +7,7 @@ using namespace artifact_promotion;
 using namespace artifact_promotion::test;
 
 AP_TEST(the_reference_lifecycle_is_valid_and_acyclic) {
+    context.phase("SETUP");
     const LifecycleGraph graph = LifecycleGraph::reference();
     const Status valid = graph.validate(Stage::Candidate);
     if (valid.failed()) {
@@ -27,6 +28,7 @@ AP_TEST(the_reference_lifecycle_is_valid_and_acyclic) {
 }
 
 AP_TEST(a_cyclic_lifecycle_graph_is_rejected) {
+    context.phase("SETUP");
     LifecycleGraph graph;
     (void)graph.add_edge(Stage::Candidate, Stage::Verified);
     (void)graph.add_edge(Stage::Verified, Stage::Candidate);
@@ -36,6 +38,7 @@ AP_TEST(a_cyclic_lifecycle_graph_is_rejected) {
 }
 
 AP_TEST(a_graph_without_an_exit_edge_is_rejected) {
+    context.phase("SETUP");
     LifecycleGraph graph;
     (void)graph.add_edge(Stage::Candidate, Stage::Verified);
     (void)graph.add_edge(Stage::Verified, Stage::Qualified);
@@ -44,15 +47,18 @@ AP_TEST(a_graph_without_an_exit_edge_is_rejected) {
 }
 
 AP_TEST(an_empty_graph_is_rejected) {
+    context.phase("SETUP");
     const LifecycleGraph graph;
     AP_CHECK_EQ(graph.validate(Stage::Candidate).code(), ErrorCode::InvalidTransition);
     AP_CHECK_EQ(graph.validate(Stage::Invalid).code(), ErrorCode::InvalidStage);
 }
 
 AP_TEST(full_promotion_path_is_recorded_in_history) {
+    context.phase("SETUP");
     Scenario scenario;
     const ArtifactId id = scenario.make_artifact_id();
     (void)scenario.register_artifact(id, ArtifactKind::Executable, "exe-life", "digest-life-1");
+    context.phase("COMMIT");
     AP_REQUIRE(scenario.drive_to_promoted(id).ok());
 
     const ArtifactRecord final_record = scenario.current(id);
@@ -74,9 +80,11 @@ AP_TEST(full_promotion_path_is_recorded_in_history) {
 }
 
 AP_TEST(repeating_a_promotion_of_the_same_revision_is_idempotent) {
+    context.phase("SETUP");
     Scenario scenario;
     const ArtifactId id = scenario.make_artifact_id();
     (void)scenario.register_artifact(id, ArtifactKind::Executable, "exe-idem", "digest-idem-1");
+    context.phase("COMMIT");
     AP_REQUIRE(scenario.drive_to_promoted(id).ok());
 
     const std::size_t records_before = scenario.engine().promotion_history(id).size();
@@ -89,6 +97,7 @@ AP_TEST(repeating_a_promotion_of_the_same_revision_is_idempotent) {
 }
 
 AP_TEST(a_duplicate_request_identity_returns_the_original_decision) {
+    context.phase("SETUP");
     Scenario scenario;
     const ArtifactId id = scenario.make_artifact_id();
     (void)scenario.register_artifact(id, ArtifactKind::Executable, "exe-dup", "digest-dup-1");
@@ -130,11 +139,14 @@ AP_TEST(a_duplicate_request_identity_returns_the_original_decision) {
 }
 
 AP_TEST(quarantine_prevents_promotion_and_release_requires_authorized_evidence) {
+    context.phase("SETUP");
     Scenario scenario;
     const ArtifactId id = scenario.make_artifact_id();
     (void)scenario.register_artifact(id, ArtifactKind::Executable, "exe-quar", "digest-quar-1");
+    context.phase("COMMIT");
     AP_REQUIRE(scenario.drive_to_promoted(id).ok());
 
+    context.phase("QUARANTINE");
     const auto quarantined = scenario.engine().quarantine(id, "security_finding", "advisory-2026-001",
                                                           scenario.authority());
     AP_REQUIRE(quarantined.has_value());
@@ -142,11 +154,14 @@ AP_TEST(quarantine_prevents_promotion_and_release_requires_authorized_evidence) 
     AP_CHECK_EQ(quarantined.value().artifact.stage, Stage::Quarantined);
     AP_CHECK(quarantined.value().artifact.quarantine.active);
     AP_CHECK(!quarantined.value().artifact.currently_authoritative());
+    context.phase("VERIFY");
     AP_CHECK_EQ(scenario.engine().check_invariants().code(), ErrorCode::Ok);
 
     // A quarantined artifact cannot be promoted, and a plain release attempt is
     // refused until the policy's release evidence exists.
+    context.phase("DISPATCH");
     AP_CHECK_EQ(scenario.step(id, Stage::Promoted), PromotionOutcome::TransitionIllegal);
+    context.phase("RELEASE-DENIED");
     const auto refused = scenario.engine().release_quarantine(id, scenario.authority());
     AP_REQUIRE(refused.has_value());
     AP_CHECK_EQ(refused.value().outcome, PromotionOutcome::EvidenceMissing);
@@ -159,6 +174,7 @@ AP_TEST(quarantine_prevents_promotion_and_release_requires_authorized_evidence) 
     approval.type = EvidenceType::HumanApproval;
     (void)scenario.submit_spec(id, approval);
 
+    context.phase("RELEASE");
     const auto released = scenario.engine().release_quarantine(id, scenario.authority());
     AP_REQUIRE(released.has_value());
     AP_CHECK_EQ(released.value().outcome, PromotionOutcome::PromotionCommitted);
@@ -170,13 +186,16 @@ AP_TEST(quarantine_prevents_promotion_and_release_requires_authorized_evidence) 
 }
 
 AP_TEST(revocation_invalidates_current_authority_but_preserves_history) {
+    context.phase("SETUP");
     Scenario scenario;
     const ArtifactId id = scenario.make_artifact_id();
     (void)scenario.register_artifact(id, ArtifactKind::Executable, "exe-rev", "digest-rev-1");
+    context.phase("COMMIT");
     AP_REQUIRE(scenario.drive_to_promoted(id).ok());
     const ArtifactRecord promoted = scenario.current(id);
     AP_CHECK(promoted.currently_authoritative());
 
+    context.phase("REVOKE");
     const auto revoked = scenario.engine().revoke(id, promoted.promotion_decision, "security_finding",
                                                   "critical advisory", scenario.authority());
     AP_REQUIRE(revoked.has_value());
@@ -202,12 +221,14 @@ AP_TEST(revocation_invalidates_current_authority_but_preserves_history) {
     AP_CHECK(saw_revocation);
 
     // A stale retry cannot resurrect the revoked authority.
+    context.phase("DISPATCH");
     AP_CHECK_EQ(scenario.step(id, Stage::Promoted), PromotionOutcome::TransitionIllegal);
     AP_CHECK(!scenario.current(id).currently_authoritative());
     AP_CHECK_EQ(scenario.engine().check_invariants().code(), ErrorCode::Ok);
 }
 
 AP_TEST(a_revocation_naming_an_unknown_decision_is_refused) {
+    context.phase("SETUP");
     Scenario scenario;
     const ArtifactId id = scenario.make_artifact_id();
     (void)scenario.register_artifact(id, ArtifactKind::Executable, "exe-rev2", "digest-rev-2");
@@ -218,14 +239,18 @@ AP_TEST(a_revocation_naming_an_unknown_decision_is_refused) {
 }
 
 AP_TEST(supersession_is_separate_from_revocation) {
+    context.phase("SETUP");
     Scenario scenario;
     const ArtifactId older = scenario.make_artifact_id();
     const ArtifactId newer = scenario.make_artifact_id();
     (void)scenario.register_artifact(older, ArtifactKind::Executable, "exe-old", "digest-old-1");
     (void)scenario.register_artifact(newer, ArtifactKind::Executable, "exe-new", "digest-new-1");
+    context.phase("COMMIT");
     AP_REQUIRE(scenario.drive_to_promoted(older).ok());
+    context.phase("COMMIT");
     AP_REQUIRE(scenario.drive_to_promoted(newer).ok());
 
+    context.phase("SUPERSEDE");
     const auto superseded = scenario.engine().supersede(older, newer, "newer revision released",
                                                         scenario.authority());
     AP_REQUIRE(superseded.has_value());
@@ -240,6 +265,7 @@ AP_TEST(supersession_is_separate_from_revocation) {
 }
 
 AP_TEST(supersession_requires_a_registered_successor_and_rejects_self_supersession) {
+    context.phase("SETUP");
     Scenario scenario;
     const ArtifactId id = scenario.make_artifact_id();
     (void)scenario.register_artifact(id, ArtifactKind::Executable, "exe-self", "digest-self-1");
@@ -255,6 +281,7 @@ AP_TEST(supersession_requires_a_registered_successor_and_rejects_self_supersessi
 }
 
 AP_TEST(rollback_eligibility_requires_policy_permission_and_current_gates) {
+    context.phase("SETUP");
     Scenario scenario;
     const ArtifactId id = scenario.make_artifact_id();
     (void)scenario.register_artifact(id, ArtifactKind::Executable, "exe-roll", "digest-roll-1");
@@ -265,6 +292,7 @@ AP_TEST(rollback_eligibility_requires_policy_permission_and_current_gates) {
     AP_CHECK(!before.eligible);
     AP_CHECK(!before.blocking_gates.empty());
 
+    context.phase("COMMIT");
     AP_REQUIRE(scenario.drive_to_promoted(id).ok());
     const auto after = scenario.engine().evaluate_rollback_eligibility(id);
     AP_CHECK(after.eligible);
@@ -272,6 +300,7 @@ AP_TEST(rollback_eligibility_requires_policy_permission_and_current_gates) {
 
     // Revocation removes rollback eligibility, because "previously promoted"
     // does not mean "safe to restore now".
+    context.phase("REVOKE");
     (void)scenario.engine().revoke(id, PromotionDecisionId{}, "integrity_failure", "digest no longer matches",
                                    scenario.authority());
     const auto revoked = scenario.engine().evaluate_rollback_eligibility(id);
@@ -279,6 +308,7 @@ AP_TEST(rollback_eligibility_requires_policy_permission_and_current_gates) {
 }
 
 AP_TEST(rollback_eligibility_is_denied_when_policy_does_not_allow_it) {
+    context.phase("SETUP");
     PromotionPolicy policy = make_reference_policy(PromotionPolicyId::from_parts(0xE, 0xF), PolicyGeneration(1));
     for (PolicyRule& rule : policy.rules) {
         if (rule.from == Stage::Approved && rule.to == Stage::Promoted) {
@@ -289,10 +319,12 @@ AP_TEST(rollback_eligibility_is_denied_when_policy_does_not_allow_it) {
 
     ScenarioOptions options;
     Scenario scenario(options);
+    context.phase("PUBLISH");
     AP_REQUIRE(scenario.engine().publish_policy(policy).has_value());
 
     const ArtifactId id = scenario.make_artifact_id();
     (void)scenario.register_artifact(id, ArtifactKind::Executable, "exe-roll2", "digest-roll-2");
+    context.phase("COMMIT");
     AP_REQUIRE(scenario.drive_to_promoted(id).ok());
 
     const auto eligibility = scenario.engine().evaluate_rollback_eligibility(id);
@@ -301,13 +333,16 @@ AP_TEST(rollback_eligibility_is_denied_when_policy_does_not_allow_it) {
 }
 
 AP_TEST(evidence_revocation_is_separate_from_artifact_revocation) {
+    context.phase("SETUP");
     Scenario scenario;
     const ArtifactId id = scenario.make_artifact_id();
     (void)scenario.register_artifact(id, ArtifactKind::Executable, "exe-ev", "digest-ev-1");
+    context.phase("COMMIT");
     AP_REQUIRE(scenario.drive_to_promoted(id).ok());
 
     const std::vector<EvidenceRecord> evidence = scenario.engine().evidence_for(id, scenario.current(id).revision);
     AP_REQUIRE(!evidence.empty());
+    context.phase("REVOKE-EVIDENCE");
     const auto withdrawn = scenario.engine().revoke_evidence(evidence.front().id, "producer withdrew the result",
                                                             scenario.authority());
     AP_REQUIRE(withdrawn.has_value());
@@ -320,11 +355,14 @@ AP_TEST(evidence_revocation_is_separate_from_artifact_revocation) {
 }
 
 AP_TEST(retirement_ends_the_lifecycle_without_asserting_invalidity) {
+    context.phase("SETUP");
     Scenario scenario;
     const ArtifactId id = scenario.make_artifact_id();
     (void)scenario.register_artifact(id, ArtifactKind::Executable, "exe-ret", "digest-ret-1");
+    context.phase("COMMIT");
     AP_REQUIRE(scenario.drive_to_promoted(id).ok());
 
+    context.phase("RETIRE");
     const auto retired = scenario.engine().retire(id, scenario.authority());
     AP_REQUIRE(retired.has_value());
     AP_CHECK_EQ(retired.value().outcome, PromotionOutcome::PromotionCommitted);
@@ -335,15 +373,19 @@ AP_TEST(retirement_ends_the_lifecycle_without_asserting_invalidity) {
 }
 
 AP_TEST(history_is_append_only_across_a_quarantine_release_cycle) {
+    context.phase("SETUP");
     Scenario scenario;
     const ArtifactId id = scenario.make_artifact_id();
     (void)scenario.register_artifact(id, ArtifactKind::Executable, "exe-hist", "digest-hist-1");
+    context.phase("COMMIT");
     AP_REQUIRE(scenario.drive_to_promoted(id).ok());
     const std::size_t promoted_records = scenario.engine().promotion_history(id).size();
 
+    context.phase("QUARANTINE");
     (void)scenario.engine().quarantine(id, "integrity_mismatch", "digest changed", scenario.authority());
     (void)scenario.submit(id, EvidenceType::SecurityScanPass, EvidenceResult::Pass, "scan");
     (void)scenario.submit(id, EvidenceType::HumanApproval, EvidenceResult::Pass, "approval");
+    context.phase("RELEASE");
     (void)scenario.engine().release_quarantine(id, scenario.authority());
 
     const std::vector<PromotionRecord> history = scenario.engine().promotion_history(id);
@@ -357,4 +399,4 @@ AP_TEST(history_is_append_only_across_a_quarantine_release_cycle) {
     }
 }
 
-int main() { return TestContext::instance().run_all("lifecycle"); }
+int main(int argc, char** argv) { return run_suite_from_command_line("lifecycle", argc, argv); }

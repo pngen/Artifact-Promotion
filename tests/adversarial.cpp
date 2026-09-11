@@ -391,4 +391,4 @@ AP_TEST(a_hostile_snapshot_claiming_a_huge_record_count_is_refused) {
     AP_CHECK(!decoded.has_value());
 }
 
-int main() { return TestContext::instance().run_all("adversarial"); }
+int main(int argc, char** argv) { return run_suite_from_command_line("adversarial", argc, argv); }
